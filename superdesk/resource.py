@@ -45,7 +45,7 @@ class Resource():
     item_url = None
     additional_lookup = None
     schema = {}
-    allow_unknown = None
+    allow_unknown = True
     item_methods = None
     resource_methods = None
     public_methods = None
