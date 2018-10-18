@@ -12,6 +12,7 @@ import flask
 import logging
 import datetime
 import superdesk
+from copy import copy, deepcopy
 
 from superdesk.resource import Resource
 from superdesk.metadata.utils import extra_response_fields, item_url, aggregations, \
@@ -21,7 +22,7 @@ from .common import remove_unwanted, update_state, set_item_expiry, remove_media
     handle_existing_data, item_schema, validate_schedule, is_item_in_package, update_schedule_settings, \
     ITEM_OPERATION, ITEM_RESTORE, ITEM_CREATE, ITEM_UPDATE, ITEM_DUPLICATE, ITEM_DUPLICATED_FROM, \
     ITEM_DESCHEDULE, ARCHIVE as SOURCE, LAST_PRODUCTION_DESK, LAST_AUTHORING_DESK, ITEM_FETCH, \
-    convert_task_attributes_to_objectId, BROADCAST_GENRE, set_dateline
+    convert_task_attributes_to_objectId, BROADCAST_GENRE, set_dateline, get_subject
 from superdesk.media.crop import CropService
 from flask import current_app as app, json
 from superdesk import get_resource_service
@@ -32,14 +33,13 @@ from eve.utils import parse_request, config, date_to_str, ParsedRequest
 from superdesk.services import BaseService
 from superdesk.users.services import current_user_has_privilege, is_admin
 from superdesk.metadata.item import ITEM_STATE, CONTENT_STATE, CONTENT_TYPE, ITEM_TYPE, EMBARGO, \
-    PUBLISH_SCHEDULE, SCHEDULE_SETTINGS, SIGN_OFF, ASSOCIATIONS, MEDIA_TYPES, INGEST_ID
+    PUBLISH_SCHEDULE, SCHEDULE_SETTINGS, SIGN_OFF, ASSOCIATIONS, MEDIA_TYPES, INGEST_ID, PROCESSED_FROM
 from superdesk.metadata.packages import LINKED_IN_PACKAGES, RESIDREF
 from apps.common.components.utils import get_component
 from apps.item_autosave.components.item_autosave import ItemAutosave
 from apps.common.models.base_model import InvalidEtag
 from superdesk.text_utils import update_word_count
 from apps.content import push_content_notification, push_expired_notification
-from copy import copy, deepcopy
 from apps.common.models.utils import get_model
 from apps.item_lock.models.item import ItemModel
 from apps.packages import PackageService
@@ -48,15 +48,6 @@ from superdesk.utc import utcnow
 
 EDITOR_KEY_PREFIX = 'editor_'
 logger = logging.getLogger(__name__)
-
-
-def get_subject(doc1, doc2=None):
-    for key in ('headline', 'subject', 'slugline'):
-        value = doc1.get(key)
-        if not value and doc2:
-            value = doc2.get(key)
-        if value:
-            return value
 
 
 def private_content_filter():
@@ -155,6 +146,7 @@ class ArchiveResource(Resource):
     item_methods = ['GET', 'PATCH', 'PUT']
     versioning = True
     privileges = {'POST': SOURCE, 'PATCH': SOURCE, 'PUT': SOURCE}
+    mongo_indexes = {'processed_from_1': ([(PROCESSED_FROM, 1)], {'background': True})}
 
 
 class ArchiveService(BaseService):
@@ -249,6 +241,10 @@ class ArchiveService(BaseService):
             3. Creates Crops if article is a picture
         """
         user = get_user()
+
+        if ITEM_TYPE in updates:
+            del updates[ITEM_TYPE]
+
         self._validate_updates(original, updates, user)
 
         if self.__is_req_for_save(updates):
@@ -450,7 +446,7 @@ class ArchiveService(BaseService):
         """
 
         new_doc = original_doc.copy()
-        self._remove_after_copy(new_doc, extra_fields)
+        self.remove_after_copy(new_doc, extra_fields)
         on_duplicate_item(new_doc, original_doc, operation)
         resolve_document_version(new_doc, SOURCE, 'PATCH', new_doc)
 
@@ -469,7 +465,7 @@ class ArchiveService(BaseService):
 
         return new_doc['guid']
 
-    def _remove_after_copy(self, copied_item, extra_fields=None):
+    def remove_after_copy(self, copied_item, extra_fields=None, delete_keys=None):
         """Removes the properties which doesn't make sense to have for an item after copy.
 
         :param copied_item: item to copy
@@ -485,7 +481,9 @@ class ArchiveService(BaseService):
         keys_to_delete.extend([config.ID_FIELD, 'guid', LINKED_IN_PACKAGES, EMBARGO, PUBLISH_SCHEDULE,
                                SCHEDULE_SETTINGS, 'lock_time', 'lock_action', 'lock_session', 'lock_user', SIGN_OFF,
                                'rewritten_by', 'rewrite_of', 'rewrite_sequence', 'highlights', 'marked_desks',
-                               '_type', 'event_id', 'assignment_id'])
+                               '_type', 'event_id', 'assignment_id', PROCESSED_FROM])
+        if delete_keys:
+            keys_to_delete.extend(delete_keys)
 
         if extra_fields:
             keys_to_delete = [key for key in keys_to_delete if key not in extra_fields]
@@ -749,7 +747,7 @@ class ArchiveService(BaseService):
             raise SuperdeskApiError.badRequestError('Cannot change the genre for broadcast content.')
 
         if PUBLISH_SCHEDULE in updates or "schedule_settings" in updates:
-            if is_item_in_package(original):
+            if is_item_in_package(original) and not force_unlock:
                 raise SuperdeskApiError.badRequestError(
                     'This item is in a package and it needs to be removed before the item can be scheduled!')
 

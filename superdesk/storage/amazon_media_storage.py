@@ -56,7 +56,11 @@ def _guess_extension(content_type):
     ext = str(guess_extension(content_type))
     if ext in ['.jpe', '.jpeg']:
         return '.jpg'
-    return ext
+    if 'mp3' in content_type or 'audio/mpeg' in content_type:
+        return '.mp3'
+    if 'flac' in content_type:
+        return '.flac'
+    return ext if ext != 'None' else ''
 
 
 class AmazonMediaStorage(MediaStorage):

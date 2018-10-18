@@ -10,10 +10,26 @@ Feature: Translate Content
       """
       {"guid": "123", "language": "en-AU"}
       """
+      And we get "/archive/#archive._id#"
+      Then we get existing resource
+      """
+      {"translation_id": "123"}
+      """
+
       When we get "/archive/#translate._id#"
       Then we get existing resource
       """
-      {"type":"text", "headline": "test1", "state": "draft", "sign_off": "abc", "language": "en-AU", "body_html": "$10 (CAD 20)"}
+      {"type":"text", "headline": "test1", "state": "draft", "sign_off": "abc", "language": "en-AU", "body_html": "$10 (CAD 20)", "translated_from": "123", "translation_id": "123"}
+      """
+
+      When we post to "/archive/translate"
+      """
+      {"guid": "#translate._id#", "language": "de"}
+      """
+      And we get "/archive/#translate._id#"
+      Then we get existing resource
+      """
+      {"language": "de", "translation_id": "123"}
       """
 
     @auth

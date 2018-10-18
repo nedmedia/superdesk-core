@@ -19,6 +19,7 @@ from apps.desks import DeskTypes
 from superdesk import get_resource_service
 from superdesk.errors import SuperdeskApiError, InvalidStateTransitionError
 from superdesk.metadata.item import ITEM_STATE, CONTENT_STATE, SIGN_OFF
+from superdesk.metadata.packages import REFS, GROUPS, RESIDREF
 from superdesk.resource import Resource
 from superdesk.services import BaseService
 from superdesk.metadata.utils import item_url
@@ -46,7 +47,8 @@ class MoveResource(Resource):
                 'desk': Resource.rel('desks', False, required=True),
                 'stage': Resource.rel('stages', False, required=True)
             }
-        }
+        },
+        'allPackageItems': {'type': 'boolean', 'required': False, 'nullable': True},
     }
 
     url = 'archive/<{0}:guid>/move'.format(item_url)
@@ -73,6 +75,24 @@ class MoveService(BaseService):
             doc = docs[0]
             moved_item = self.move_content(guid_of_item_to_be_moved, doc)
             guid_of_moved_items.append(moved_item.get(config.ID_FIELD))
+
+            if moved_item.get('type', None) == 'composite' and doc.get('allPackageItems', False):
+                try:
+                    item_lock_id = None
+                    for item_id in (ref[RESIDREF] for group in moved_item.get(GROUPS, [])
+                                    for ref in group.get(REFS, []) if RESIDREF in ref):
+                        item_lock_id = "item_move {}".format(item_id)
+                        if lock(item_lock_id, expire=5):
+                            item = self.move_content(item_id, doc)
+                            guid_of_moved_items.append(item.get(config.ID_FIELD))
+                            unlock(item_lock_id, remove=True)
+                            item_lock_id = None
+                        else:
+                            item_lock_id = None
+                finally:
+                    if item_lock_id:
+                        unlock(item_lock_id, remove=True)
+
             return guid_of_moved_items
         finally:
             unlock(lock_id, remove=True)

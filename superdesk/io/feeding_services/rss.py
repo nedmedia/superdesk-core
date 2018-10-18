@@ -22,6 +22,7 @@ from superdesk.io.feeding_services import FeedingService
 from superdesk.metadata.item import ITEM_TYPE, CONTENT_TYPE, GUID_TAG
 from superdesk.utils import merge_dicts
 from superdesk.metadata.utils import generate_guid, generate_tag, generate_tag_from_url
+from superdesk.io.commands.update_ingest import LAST_ITEM_UPDATE
 
 from urllib.parse import quote as urlquote, urlsplit, urlunsplit
 
@@ -81,8 +82,6 @@ class RSSFeedingService(FeedingService):
             }
         }
     ]
-
-    parser_restricted_values = None
 
     field_groups = {'auth_data': {'label': 'Authentication Info', 'fields': ['username', 'password']}}
 
@@ -184,7 +183,7 @@ class RSSFeedingService(FeedingService):
         # so that it will be recognized as "not up to date".
         # Also convert it to a naive datetime object (removing tzinfo is fine,
         # because it is in UTC anyway)
-        t_provider_updated = provider.get('last_updated', utcfromtimestamp(0))
+        t_provider_updated = provider.get(LAST_ITEM_UPDATE, utcfromtimestamp(0))
         t_provider_updated = t_provider_updated.replace(tzinfo=None)
 
         new_items = []
@@ -243,9 +242,9 @@ class RSSFeedingService(FeedingService):
         try:
             response = requests.get(url, auth=auth, timeout=30)
         except requests.exceptions.ConnectionError as err:
-            raise IngestApiError.apiConnectionError(exception=err)
+            raise IngestApiError.apiConnectionError(exception=err, provider=provider)
         except requests.exceptions.RequestException as err:
-            raise IngestApiError.apiURLError(exception=err)
+            raise IngestApiError.apiURLError(exception=err, provider=provider)
 
         if response.ok:
             return response.content

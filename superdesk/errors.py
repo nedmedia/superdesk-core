@@ -216,7 +216,9 @@ class SuperdeskIngestError(SuperdeskError):
 
         if exception:
             if provider.get('notifications', {}).get('on_error', True) and notifications_enabled():
-                exception_msg = str(exception)[-200:]
+                exception_msg = str(exception)
+                if len(exception_msg) > 200:
+                    exception_msg = exception_msg[200:] + '…'
                 update_notifiers('error',
                                  'Error [%s] on ingest provider {{name}}: %s' % (code, exception_msg),
                                  resource='ingest_providers' if provider else None,
@@ -522,6 +524,7 @@ class FormatterError(SuperdeskPublishError):
         7009: 'Article couldn"t be converted to AAP Newscentre',
         7010: 'Article couldn"t be converted to Email',
         7011: 'Article couldn"t be converted to AAP Text format',
+        7012: 'Article couldn"t be converted to Adobe IDML format',
     }
 
     @classmethod
@@ -567,6 +570,10 @@ class FormatterError(SuperdeskPublishError):
     @classmethod
     def AAPTextFormatterError(cls, exception=None, destination=None):
         return FormatterError(7011, exception, destination)
+
+    @classmethod
+    def IDMLFormatterError(cls, exception=None, destination=None):
+        return FormatterError(7012, exception, destination)
 
 
 class SubscriberError(SuperdeskPublishError):
@@ -699,3 +706,7 @@ class AlreadyExistsError(Exception):
 
 class SkipValue(Exception):
     """Exception used in XML feed_parser callbacks when a value is not needed"""
+
+
+class StopDuplication(Exception):
+    """Exception used in internal destination to not duplicate the item after marco execution"""

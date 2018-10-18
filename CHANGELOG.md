@@ -1,5 +1,87 @@
 # Superdesk Server Changelog
 
+## [1.25.1] 2018-09-19
+
+### Fixed
+
+- Fix media id missing extension for mp3 files when using Amazon backend.
+- Add qcode to genre element in NewsmlG2 output.
+- Fix send to with items package operation.
+- Handle daylight saving time in Ritzau ingest.
+
+## [1.25] 2018-09-18
+
+### Fixed
+
+- Optimize the enqueue processing of content filters.
+- Fix calculation of next run for template schedule.
+- Fix FTP ingest config form.
+- If error message is too long, use first 200 characters instead of last.
+
+### Added
+
+- Add IDML output support.
+- Allow moving package with all items.
+- Add saved searches subscriptions and scheduled reports.
+
+### Changed
+
+- Update PyYAML version.
+
+## [1.24] 2018-08-20
+
+### Fixed
+
+- Add missing provider information in error messages.
+- Don't overwrite editable fields for embedded media items.
+- Set default crops when crops values are missing in payload.
+- Convert RGBA jpg images to RGB only if saving fails.
+
+### Changed
+
+- Extending internal destination to publish the duplicate item.
+- Associations are now validated in backend
+- New setting `VALIDATOR_MEDIA_METADATA` to indicate which fields are mandatory in media
+- Executing on stage macro when content is created via scheduled template.
+
+## [1.23] 2018-08-07
+
+### Fixed
+
+- Fix the upload of rgba jpg images.
+- Filter non text fields from content filter options.
+- Fix dictionary entries saving when ending with dot.
+- Prevent item type change after it's created.
+
+### Added
+
+- Add `agenda_href` to content api items schema.
+- Add event and coverage ids to content api items schema.
+- Add Preview API support.
+
+### Changed
+
+- Move tweet url from ednote to extra field in twitter ingest.
+- Move aggregations to be a member of search endpoint class.
+
+## [1.22] 2018-06-17
+
+### Fixed
+
+- Fix unlocking not working due to schedule validation.
+
+### Added
+
+- Add support to expire user password after given period.
+- Allow media transmitting while formatting item. 
+- Create context manager for es aggregations.
+- Add registry for restricted parser on feeding services.
+- Add `preview_endpoint_url` to subscribers schema.
+
+### Changed
+
+- Add mongo index on `_id_document` in `archive_versions` collection.
+
 ## [1.21] 2018-06-25
 
 ### Fixed

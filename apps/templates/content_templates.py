@@ -10,25 +10,27 @@
 
 import re
 import superdesk
+import logging
+from flask import render_template_string
+from copy import deepcopy
 from superdesk.services import BaseService
 from superdesk import Resource, Service, config, get_resource_service
-from superdesk.utils import SuperdeskBaseEnum
+from superdesk.utils import SuperdeskBaseEnum, plaintext_filter
 from superdesk.resource import build_custom_hateoas
-from superdesk.utc import utcnow, set_time, local_to_utc
+from superdesk.utc import utcnow, local_to_utc, utc_to_local
 from superdesk.errors import SuperdeskApiError
 from superdesk.metadata.item import metadata_schema, ITEM_STATE, CONTENT_STATE
 from superdesk.celery_app import celery
-from superdesk.utils import plaintext_filter
-from apps.rules.routing_rules import Weekdays
-from apps.archive.common import ARCHIVE, CUSTOM_HATEOAS, item_schema, format_dateline_to_locmmmddsrc
-from apps.archive.common import insert_into_versions, ARCHIVE_SCHEMA_FIELDS
+from apps.tasks import apply_onstage_rule
+from apps.archive.common import ARCHIVE, CUSTOM_HATEOAS, item_schema, format_dateline_to_locmmmddsrc, \
+    insert_into_versions, ARCHIVE_SCHEMA_FIELDS
 from apps.auth import get_user
-from flask import render_template_string
-from datetime import timedelta
-from copy import deepcopy
-import logging
+
 from superdesk.lock import lock, unlock
 from superdesk.celery_task_utils import get_lock_id
+from croniter import croniter
+from datetime import datetime
+
 
 CONTENT_TEMPLATE_RESOURCE = 'content_templates'
 CONTENT_TEMPLATE_PRIVILEGE = CONTENT_TEMPLATE_RESOURCE
@@ -59,40 +61,48 @@ def get_schema():
     return schema
 
 
-def get_next_run(schedule, now=None):
+def get_next_run(schedule, now_utc=None):
     """Get next run time based on schedule.
 
     Schedule is day of week and time.
 
     :param dict schedule: dict with `day_of_week` and `create_at` params
-    :param datetime now
+    :param now_utc
     :return datetime
     """
     if not schedule.get('is_active', False):
         return None
 
-    allowed_days = [Weekdays[day.upper()].value for day in schedule.get('day_of_week', [])]
-    if not allowed_days:
-        return None
+    if now_utc is None:
+        now_utc = utcnow()
 
-    if now is None:
-        now = utcnow()
+    now_utc = now_utc.replace(second=0)
 
-    now = now.replace(second=0)
+    # Derive the first cron_list entry from the create_at and day_of_week
+    if 'create_at' in schedule and 'cron_list' not in schedule:
+        time = schedule.get('create_at').split(':')
+        cron_days = ','.join(schedule.get('day_of_week', '*')) if len(schedule.get('day_of_week')) else '*'
+        cron_entry = '{} {} * * {}'.format(time[1], time[0], cron_days)
+        schedule['cron_list'] = [cron_entry]
+        schedule.pop('create_at', None)
 
     # adjust current time to the schedule's timezone
     tz_name = schedule.get('time_zone', 'UTC')
     if tz_name != 'UTC':
-        next_run = local_to_utc(tz_name, set_time(now, schedule.get('create_at')))
+        current_local_datetime = utc_to_local(tz_name, now_utc)  # convert utc to local time
+        cron = croniter(schedule.get('cron_list')[0], current_local_datetime)
+        next_run = local_to_utc(tz_name, cron.get_next(datetime))
+        for cron_entry in schedule.get('cron_list'):
+            next_candidate = local_to_utc(tz_name, croniter(cron_entry, current_local_datetime).get_next(datetime))
+            if next_candidate < next_run:
+                next_run = next_candidate
     else:
-        next_run = set_time(now, schedule.get('create_at'))
-
-    # if the time passed already today do it tomorrow earliest
-    if next_run <= now:
-        next_run += timedelta(days=1)
-
-    while next_run.weekday() not in allowed_days:
-        next_run += timedelta(days=1)
+        cron = croniter(schedule.get('cron_list')[0], now_utc)
+        next_run = cron.get_next(datetime)
+        for cron_entry in schedule.get('cron_list'):
+            next_candidate = croniter(cron_entry, now_utc).get_next(datetime)
+            if next_candidate < next_run:
+                next_run = next_candidate
 
     return next_run
 
@@ -131,6 +141,9 @@ class ContentTemplatesResource(Resource):
         'schedule': {'type': 'dict', 'schema': {
             'is_active': {'type': 'boolean'},
             'create_at': {'type': 'string'},
+            # List of cron expressions that determine the times items should be created.
+            'cron_list': {'type': 'list', 'required': False, 'nullable': True,
+                          'schema': {'type': 'string'}},
             'day_of_week': {'type': 'list'},
             'time_zone': {
                 'type': 'string',
@@ -196,6 +209,25 @@ class ContentTemplatesService(BaseService):
             profile = get_resource_service('content_types').find_one(req=None, _id=profile_id)
             data, _ = self._reset_fields(original_template, profile)
             updates['data'] = data
+
+    def on_fetched(self, docs):
+        self.enhance_items(docs[config.ITEMS])
+
+    def on_fetched_item(self, doc):
+        self.enhance_items([doc])
+
+    def enhance_items(self, items):
+        for item in items:
+            self.handle_existing_data(item)
+
+    def handle_existing_data(self, item):
+        schedule = item.get('schedule')
+        if schedule and 'cron_list' not in schedule and 'create_at' in schedule:
+            time = schedule.get('create_at').split(':')
+            cron_days = ','.join(schedule.get('day_of_week', '*')) if len(schedule.get('day_of_week')) else '*'
+            cron_entry = '{} {} * * {}'.format(time[1], time[0], cron_days)
+            schedule['cron_list'] = [cron_entry]
+            schedule.pop('create_at', None)
 
     def on_delete(self, doc):
         if doc.get('template_type') == TemplateType.KILL.value:
@@ -501,6 +533,10 @@ def create_scheduled_content(now=None):
             item[config.VERSION] = 1
             production.post([item])
             insert_into_versions(doc=item)
+            try:
+                apply_onstage_rule(item, item.get(config.ID_FIELD))
+            except Exception as ex:  # noqa
+                logger.exception('Failed to apply on stage rule while scheduling template.')
             items.append(item)
         return items
     except Exception as e:

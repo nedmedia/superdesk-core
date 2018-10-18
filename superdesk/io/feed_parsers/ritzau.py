@@ -15,10 +15,10 @@ from superdesk.errors import ParserError
 from superdesk import etree as sd_etree
 from collections import OrderedDict
 from superdesk import text_utils
+from superdesk.utc import local_to_utc
 import superdesk
 import dateutil.parser
 import logging
-from pytz import timezone
 
 logger = logging.getLogger(__name__)
 NS = {'r': 'http://tempuri.org/',
@@ -34,6 +34,7 @@ class RitzauFeedParser(XMLFeedParser):
 
     NAME = 'ritzau'
     label = "Ritzau feed"
+    TIMEZONE = 'Europe/Copenhagen'
 
     def __init__(self):
         super().__init__()
@@ -51,14 +52,24 @@ class RitzauFeedParser(XMLFeedParser):
             ('headline', {'xpath': 'headline/text()',
                           'default': '',
                           'key_hook': self._set_headline}),
-            ('priority', 'Priority/text()'),
+            ('priority', {
+                'xpath': 'Priority/text()',
+                'filter': int
+            }),
+            ('urgency', {
+                'xpath': 'Priority/text()',
+                'filter': int
+            }),
             ('keywords', {'xpath': 'strapline/text()',
                           'filter': lambda v: list(filter(None, v.split('/')))}),
             ('abstract', 'subtitle'),
             ('byline', 'origin'),
             ('version', {'xpath': 'version/text()',
                          'filter': int}),
-            ('ednote', 'Tilredaktionen/text()'),
+            ('ednote', {
+                'xpath': 'TilRedaktionen/text()',
+                'filter': self._ednote_filter
+            }),
             ('subject', {'xpath': 'IPTCList/a:int/text()',
                          'list': True,
                          'filter': self._subject_filter})])
@@ -101,8 +112,8 @@ class RitzauFeedParser(XMLFeedParser):
         return {'qcode': qcode, 'name': name, 'scheme': 'subject_custom'}
 
     def _publish_date_filter(self, date_string):
-        dt = dateutil.parser.parse(date_string)
-        return dt.replace(tzinfo=timezone('CET'))
+        local = dateutil.parser.parse(date_string)
+        return local_to_utc(self.TIMEZONE, local)
 
     def _set_headline(self, item, value):
         if not value:
@@ -110,6 +121,9 @@ class RitzauFeedParser(XMLFeedParser):
             # cf. SDNTB-481
             value = text_utils.get_text(item.get('body_html', ''), 'html')[:100]
         item['headline'] = value
+
+    def _ednote_filter(self, ednote):
+        return text_utils.get_text(ednote, lf_on_block=True).strip()
 
 
 register_feed_parser(RitzauFeedParser.NAME, RitzauFeedParser())

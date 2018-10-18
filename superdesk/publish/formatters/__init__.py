@@ -13,6 +13,7 @@ from lxml import etree
 from superdesk.metadata.item import ITEM_TYPE, CONTENT_TYPE, FORMATS, FORMAT
 from superdesk.etree import parse_html
 from superdesk.text_utils import get_text
+from superdesk.publish import registered_transmitters
 
 formatters = []
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class Formatter(metaclass=FormatterRegistry):
     def __init__(self):
         self.can_preview = False
         self.can_export = False
+        self.destination = None
+        self.subscriber = None
 
     def format(self, article, subscriber, codes=None):
         """Formats the article and returns the transformed string"""
@@ -125,6 +128,19 @@ class Formatter(metaclass=FormatterRegistry):
         if len(list(element)) == 0:
             etree.SubElement(element, 'p').text = etree.tostring(root, encoding="unicode", method="text")
 
+    def set_destination(self, destination=None, subscriber=None):
+        self.destination = destination
+        self.subscriber = subscriber
+
+    def _publish_media(self, media):
+        if self.destination:
+            try:
+                transmitter = registered_transmitters[self.destination['delivery_type']]
+            except KeyError:
+                logger.warning('Missing transmitter for destination %s', self.destination)
+            else:
+                return transmitter.transmit_media(media, self.subscriber, self.destination)
+
 
 def get_formatter(format_type, article):
     """Get parser for given xml.
@@ -147,3 +163,4 @@ from .newsml_1_2_formatter import NewsML12Formatter  # NOQA
 from .newsml_g2_formatter import NewsMLG2Formatter  # NOQA
 from .email_formatter import EmailFormatter  # NOQA
 from .ninjs_newsroom_formatter import NewsroomNinjsFormatter  # NOQA
+from .idml_formatter import IDMLFormatter  # NOQA

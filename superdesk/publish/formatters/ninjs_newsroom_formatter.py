@@ -31,7 +31,14 @@ class NewsroomNinjsFormatter(NINJSFormatter):
 
     def _transform_to_ninjs(self, article, subscriber, recursive=True):
         ninjs = super()._transform_to_ninjs(article, subscriber, recursive)
-
         ninjs['products'] = self._format_products(article)
+
+        if article.get('assignment_id'):
+            assignment = superdesk.get_resource_service('assignments').find_one(req=None, _id=article['assignment_id'])
+            if assignment is not None:
+                if assignment.get('coverage_item'):
+                    ninjs.setdefault('coverage_id', assignment['coverage_item'])
+                if assignment.get('planning_item'):
+                    ninjs.setdefault('planning_id', assignment['planning_item'])
 
         return ninjs

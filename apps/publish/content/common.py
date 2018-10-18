@@ -63,6 +63,9 @@ publish_services = {
     ITEM_TAKEDOWN: 'archive_takedown'
 }
 
+PRESERVED_FIELDS = ['headline', 'byline', 'usageterms', 'alt_text',
+                    'description_text', 'copyrightholder', 'copyrightnotice']
+
 
 class BasePublishResource(ArchiveResource):
     """
@@ -107,7 +110,7 @@ class BasePublishService(BaseService):
         self._mark_media_item_as_used(updates, original)
 
     def on_updated(self, updates, original):
-        original = get_resource_service(ARCHIVE).find_one(req=None, _id=original[config.ID_FIELD])
+        original = super().find_one(req=None, _id=original[config.ID_FIELD])
         updates.update(original)
 
         if updates[ITEM_OPERATION] not in {ITEM_KILL, ITEM_TAKEDOWN} and \
@@ -523,7 +526,8 @@ class BasePublishService(BaseService):
         associations = original.get(ASSOCIATIONS) or {}
         for associations_key, item in associations.items():
             if type(item) == dict and item.get(config.ID_FIELD):
-                keys = DEFAULT_SCHEMA.keys()
+                keys = [key for key in DEFAULT_SCHEMA.keys() if key not in PRESERVED_FIELDS]
+
                 if app.settings.get('COPY_METADATA_FROM_PARENT') and item.get(ITEM_TYPE) in MEDIA_TYPES:
                     original_item = original
                     keys = FIELDS_TO_COPY_FOR_ASSOCIATED_ITEM

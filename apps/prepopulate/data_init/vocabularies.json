@@ -120,9 +120,7 @@
             {"is_active": true, "name": "video", "qcode": "video"},
             {"is_active": true, "name": "picture", "qcode": "picture"},
             {"is_active": true, "name": "graphic", "qcode": "graphic"},
-            {"is_active": true, "name": "composite", "qcode": "composite"},
-            {"is_active": true, "name": "planning item", "qcode": "planning"},
-            {"is_active": true, "name": "event", "qcode": "event"}
+            {"is_active": true, "name": "composite", "qcode": "composite"}
         ],
         "init_version": 1
     },
@@ -168,14 +166,16 @@
                     {"name": "NINJS", "qcode": "ninjs"},
                     {"name": "NewsML G2", "qcode": "newsmlg2"},
                     {"name": "Email", "qcode": "email"},
-                    {"name": "Newsroom NINJS", "qcode": "newsroom ninjs"}
+                    {"name": "Newsroom NINJS", "qcode": "newsroom ninjs"},
+                    {"name": "Adobe InDesign (IDML)", "qcode": "idml"}
                 ]},
             {"is_active": true, "name": "Digital/Internet", "qcode": "digital",
                 "formats": [
                     {"name": "NINJS", "qcode": "ninjs"},
                     {"name": "NewsML G2", "qcode": "newsmlg2"},
                     {"name": "Email", "qcode": "email"},
-                    {"name": "Newsroom NINJS", "qcode": "newsroom ninjs"}
+                    {"name": "Newsroom NINJS", "qcode": "newsroom ninjs"},
+                    {"name": "Adobe InDesign (IDML)", "qcode": "idml"}
                 ]},
             {"is_active": true, "name": "Wire/Paper", "qcode": "wire",
                 "formats": [
@@ -296,6 +296,22 @@
             "qcode": {},
             "name": {},
             "is_active": {}
+        }
+    },
+    {
+        "_id": "usageterms",
+        "display_name": "Terms of use",
+        "type": "manageable",
+        "unique_field": "qcode",
+        "single_value": true,
+        "items": [
+            {"is_active": true, "qcode": "single-usage", "name": "Single Usage"},
+            {"is_active": true, "qcode": "time-restricted", "name": "Time Restricted"},
+            {"is_active": true, "qcode": "indefinite-usage", "name": "Indefinite Usage"}
+        ],
+        "schema": {
+            "qcode": {},
+            "name": {}
         }
     }
 ]

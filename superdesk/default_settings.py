@@ -322,7 +322,11 @@ CELERY_BEAT_SCHEDULE = {
     'legal:import_legal_archive': {
         'task': 'apps.legal_archive.import_legal_archive',
         'schedule': crontab(minute=30, hour=local_to_utc_hour(0))
-    }
+    },
+    'saved_searches:report': {
+        'task': 'apps.saved_searches.report',
+        'schedule': timedelta(minutes=1)
+    },
 }
 
 #: Sentry DSN - will report exceptions there
@@ -398,6 +402,7 @@ CORE_APPS.extend([
     'superdesk.io.feed_parsers',
     'superdesk.io.webhooks',
     'superdesk.io.subjectcodes',
+    'superdesk.io.format_document_for_preview',
     'superdesk.io.iptc',
     'apps.io',
     'apps.io.feeding_services',
@@ -517,6 +522,9 @@ SUPERDESK_TESTING = strtobool(env('SUPERDESK_TESTING', 'false'))
 
 #: Set the timezone celery functions to UTC to avoid daylight savings issues SDESK-1057
 CELERY_TIMEZONE = 'UTC'
+
+#: The number of days after the user has to change his password
+PASSWORD_EXPIRY_DAYS = int(env('PASSWORD_EXPIRY_DAYS', 0))
 
 #: The number of minutes since the last update of the Mongo auth object after which it will be deleted
 SESSION_EXPIRY_MINUTES = int(env('SESSION_EXPIRY_MINUTES', 240))
@@ -675,3 +683,31 @@ ERROR_NOTIFICATIONS = strtobool(env('SUPERDESK_ERROR_NOTIFICATIONS', 'true'))
 
 #: geonames credentials
 GEONAMES_USERNAME = env('GEONAMES_USERNAME')
+
+# media required fields
+VALIDATOR_MEDIA_METADATA = {
+    "headline": {
+        "required": True,
+    },
+    "alt_text": {
+        "required": True,
+    },
+    "archive_description": {
+        "required": False,
+    },
+    "description_text": {
+        "required": True,
+    },
+    "copyrightholder": {
+        "required": False,
+    },
+    "byline": {
+        "required": False,
+    },
+    "usageterms": {
+        "required": False,
+    },
+    "copyrightnotice": {
+        "required": False,
+    },
+}

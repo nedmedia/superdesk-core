@@ -238,7 +238,12 @@ def update_provider(provider, rule_set=None, routing_scheme=None):
         for items in feeding_service.update(provider, update):
             ingest_items(items, provider, feeding_service, rule_set, routing_scheme)
             if items:
-                update[LAST_ITEM_UPDATE] = utcnow()
+                last_item_update = max(
+                    [item['versioncreated'] for item in items if item.get('versioncreated')],
+                    default=utcnow()
+                )
+                if not update.get(LAST_ITEM_UPDATE) or update[LAST_ITEM_UPDATE] < last_item_update:
+                    update[LAST_ITEM_UPDATE] = last_item_update
 
         # Some Feeding Services update the collection and by this time the _etag might have been changed.
         # So it's necessary to fetch it once again. Otherwise, OriginalChangedError is raised.
@@ -491,23 +496,24 @@ def ingest_item(item, provider, feeding_service, rule_set=None, routing_scheme=N
                 update_renditions(item, href, old_item)
 
         # if the item has associated media
-        if item.get('associations', {}).get('featuremedia'):
-            transfer_renditions(item.get('associations').get('featuremedia').get('renditions', {}))
+        for key, assoc in item.get('associations', {}).items():
+            if assoc.get('renditions'):
+                transfer_renditions(assoc['renditions'])
             # wire up the id of the associated feature media to the ingested one
-            guid = item.get('associations').get('featuremedia').get('guid')
+            guid = assoc.get('guid')
             if guid:
                 lookup = {'guid': guid}
-                featuremedia = ingest_service.get_from_mongo(req=None, lookup=lookup)
-                if featuremedia.count() >= 1:
-                    item['associations']['featuremedia']['_id'] = featuremedia[0]['_id']
-                    for rendition in featuremedia[0].get('renditions', {}):  # add missing renditions
-                        item['associations']['featuremedia']['renditions'].setdefault(
+                ingested = ingest_service.get_from_mongo(req=None, lookup=lookup)
+                if ingested.count() >= 1:
+                    assoc['_id'] = ingested[0]['_id']
+                    for rendition in ingested[0].get('renditions', {}):  # add missing renditions
+                        assoc['renditions'].setdefault(
                             rendition,
-                            featuremedia[0]['renditions'][rendition])
+                            ingested[0]['renditions'][rendition])
                 else:  # there is no such item in the system - ingest it
-                    status, ids = ingest_item(item['associations']['featuremedia'], provider, feeding_service, rule_set)
+                    status, ids = ingest_item(assoc, provider, feeding_service, rule_set)
                     if status:
-                        item['associations']['featuremedia']['_id'] = ids[0]
+                        assoc['_id'] = ids[0]
                         items_ids.extend(ids)
 
         new_version = True

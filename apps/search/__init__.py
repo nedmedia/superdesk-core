@@ -10,14 +10,16 @@
 
 from flask import current_app as app, json, g
 from eve_elastic.elastic import set_filters
+from copy import deepcopy
 
 import superdesk
 
 from superdesk import get_resource_service
 from superdesk.metadata.item import CONTENT_STATE, ITEM_STATE
-from superdesk.metadata.utils import aggregations, item_url, get_elastic_highlight_query
+from superdesk.metadata.utils import aggregations as common_aggregations, item_url, get_elastic_highlight_query
 from apps.archive.archive import SOURCE as ARCHIVE
 from superdesk.resource import build_custom_hateoas
+from superdesk import es_utils
 
 
 class SearchService(superdesk.Service):
@@ -26,7 +28,8 @@ class SearchService(superdesk.Service):
     It can search against different collections like Ingest, Production, Archived etc.. at the same time.
     """
 
-    repos = ['ingest', 'archive', 'published', 'archived']
+    repos = es_utils.REPOS
+    aggregations = deepcopy(common_aggregations)
 
     @property
     def elastic(self):
@@ -35,34 +38,82 @@ class SearchService(superdesk.Service):
     def __init__(self, datasource, backend):
         super().__init__(datasource=datasource, backend=backend)
 
+    def get_ingest_filters(self):
+        """
+        Returns Ingest filters
+        """
+        return [{'term': {'_type': 'ingest'}}]
+
+    def get_archive_filters(self):
+        """
+        Returns Archive filters filters
+
+        If the content state is draft, it must be from the current user
+        """
+        user_id = (g.get('user') or {}).get('_id')
+        return [
+            {'exists': {'field': 'task.desk'}},
+            {
+                'bool': {
+                    'should': [
+                        {
+                            'and': [
+                                {'term': {ITEM_STATE: CONTENT_STATE.DRAFT}},
+                                {'term': {'task.user': str(user_id)}}
+                            ]
+                        },
+                        {
+                            'terms': {
+                                ITEM_STATE: [
+                                    CONTENT_STATE.FETCHED,
+                                    CONTENT_STATE.ROUTED,
+                                    CONTENT_STATE.PROGRESS,
+                                    CONTENT_STATE.SUBMITTED,
+                                    CONTENT_STATE.SPIKED
+                                ]
+                            }
+                        }
+                    ],
+                    'must_not': {'term': {'version': 0}}
+                }
+            }
+        ]
+
+    def get_published_filters(self):
+        """
+        Returns published filters
+        """
+        return [
+            {'term': {'_type': 'published'}},
+            {'terms': {
+                ITEM_STATE: [
+                    CONTENT_STATE.SCHEDULED,
+                    CONTENT_STATE.PUBLISHED,
+                    CONTENT_STATE.KILLED,
+                    CONTENT_STATE.RECALLED,
+                    CONTENT_STATE.CORRECTED
+                ]
+            }
+            }
+        ]
+
+    def get_archived_filters(self):
+        """
+        Returns archived filters
+        """
+        return [{'term': {'_type': 'archived'}}]
+
     def _get_private_filters(self, repo, invisible_stages):
-        query = {}
+        query = {'and': []}
+
         if repo == 'ingest':
-            query = {'and': [{'term': {'_type': 'ingest'}}]}
+            query['and'].extend(self.get_ingest_filters())
         elif repo == 'archive':
-            user_id = g.get('user', {}).get('_id')
-            query = {'and': [{'exists': {'field': 'task.desk'}},
-                             {'bool': {
-                                 'should': [
-                                     {'and': [{'term': {ITEM_STATE: CONTENT_STATE.DRAFT}},
-                                              {'term': {'task.user': str(user_id)}}]},
-                                     {'terms': {ITEM_STATE: [CONTENT_STATE.FETCHED,
-                                                             CONTENT_STATE.ROUTED,
-                                                             CONTENT_STATE.PROGRESS,
-                                                             CONTENT_STATE.SUBMITTED,
-                                                             CONTENT_STATE.SPIKED]}},
-                                 ],
-                                 'must_not': {'term': {'version': 0}}
-                             }}]}
+            query['and'].extend(self.get_archive_filters())
         elif repo == 'published':
-            query = {'and': [{'term': {'_type': 'published'}},
-                             {'terms': {ITEM_STATE: [CONTENT_STATE.SCHEDULED,
-                                                     CONTENT_STATE.PUBLISHED,
-                                                     CONTENT_STATE.KILLED,
-                                                     CONTENT_STATE.RECALLED,
-                                                     CONTENT_STATE.CORRECTED]}}]}
+            query['and'].extend(self.get_published_filters())
         elif repo == 'archived':
-            query = {'and': [{'term': {'_type': 'archived'}}]}
+            query['and'].extend(self.get_archived_filters())
 
         if invisible_stages and repo != 'ingest':
             query['and'].append({'not': {'terms': {'task.stage': invisible_stages}}})
@@ -74,7 +125,7 @@ class SearchService(superdesk.Service):
         args = getattr(req, 'args', {})
         query = json.loads(args.get('source')) if args.get('source') else {'query': {'filtered': {}}}
         if app.data.elastic.should_aggregate(req):
-            query['aggs'] = aggregations
+            query['aggs'] = self.aggregations
 
         if app.data.elastic.should_highlight(req):
             highlight_query = get_elastic_highlight_query(self._get_highlight_query_string(req))
@@ -98,11 +149,14 @@ class SearchService(superdesk.Service):
         args = getattr(req, 'args', {})
         repos = args.get('repo')
 
+        # If not repos were supplied, return the default repos
         if repos is None:
             return self.repos.copy()
         else:
             repos = repos.split(',')
-            return [repo for repo in repos if repo in self.repos]
+
+            # If the repos array is still empty after filtering, then return the default repos
+            return [repo for repo in repos if repo in self.repos] or self.repos.copy()
 
     def _get_filters(self, repos, invisible_stages):
         """
@@ -115,6 +169,18 @@ class SearchService(superdesk.Service):
 
         return [{'or': filters}] if filters else []
 
+    def get_stages_to_exclude(self):
+        """
+        Returns the list of the current users invisible stages
+        """
+        user = g.get('user', {})
+        if 'invisible_stages' in user:
+            stages = user.get('invisible_stages')
+        else:
+            stages = get_resource_service('users').get_invisible_stages_ids(user.get('_id'))
+
+        return stages
+
     def get(self, req, lookup):
         """
         Runs elastic search on multiple doc types.
@@ -123,14 +189,8 @@ class SearchService(superdesk.Service):
         query = self._get_query(req)
         fields = self._get_projected_fields(req)
         types = self._get_types(req)
-
-        user = g.get('user', {})
-        if 'invisible_stages' in user:
-            stages = user.get('invisible_stages')
-        else:
-            stages = get_resource_service('users').get_invisible_stages_ids(user.get('_id'))
-
-        filters = self._get_filters(types, stages)
+        excluded_stages = self.get_stages_to_exclude()
+        filters = self._get_filters(types, excluded_stages)
 
         # if the system has a setting value for the maximum search depth then apply the filter
         if not app.settings['MAX_SEARCH_DEPTH'] == -1:
@@ -143,7 +203,7 @@ class SearchService(superdesk.Service):
         if fields:
             params['_source'] = fields
 
-        hits = self.elastic.es.search(body=query, index=self._get_index(), doc_type=types, params=params)
+        hits = self.elastic.es.search(body=query, index=es_utils.get_index(), doc_type=types, params=params)
         docs = self._get_docs(hits)
 
         for resource in types:
@@ -164,7 +224,7 @@ class SearchService(superdesk.Service):
 
     def find_one(self, req, **lookup):
         """Find item by id in all collections."""
-        hits = self.elastic.es.mget({'ids': [lookup[app.config['ID_FIELD']]]}, self._get_index())
+        hits = self.elastic.es.mget({'ids': [lookup[app.config['ID_FIELD']]]}, es_utils.get_index())
         hits['hits'] = {'hits': hits.pop('docs', [])}
         docs = self._get_docs(hits)
         return docs.first()
@@ -181,19 +241,12 @@ class SearchService(superdesk.Service):
         for item in docs:
             build_custom_hateoas({'self': {'title': item['_type'], 'href': '/{}/{{_id}}'.format(item['_type'])}}, item)
 
-    def _get_index(self):
-        """Get index id for all repos."""
-        indexes = {app.data.elastic.index}
-        for repo in self.repos:
-            indexes.add(app.config['ELASTICSEARCH_INDEXES'].get(repo, app.data.elastic.index))
-        return ','.join(indexes)
-
     def get_available_indexes(self):
         """Returns a set of the configured indexes
 
         :return:
         """
-        return set(self._get_index().split(','))
+        return set(es_utils.get_index().split(','))
 
 
 class SearchResource(superdesk.Resource):

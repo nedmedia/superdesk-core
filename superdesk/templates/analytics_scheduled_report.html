@@ -1,0 +1,23 @@
+{% extends "email_layout.html" %}
+
+{% block content %}
+{{html_body | safe}}
+<br>
+<table border="0" cellpadding="0" cellspacing="0" style="width: 100%;">
+    {% for report in reports %}
+        {% if report.type == 'html' %}
+            <tr>
+                <td>
+                    {{report.html | safe}}
+                </td>
+            </tr>
+        {% elif report.type == 'image' %}
+            <tr>
+                <td>
+                    <img src="cid:{{report.id}}" style="height: auto !important; max-width: {{report.width}}px !important; width: 100% !important;">
+                </td>
+            </tr>
+        {% endif %}
+    {% endfor %}
+</table>
+{% endblock %}

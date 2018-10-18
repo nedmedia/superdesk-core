@@ -56,8 +56,6 @@ class TwitterFeedingService(FeedingService):
         }
     ]
 
-    parser_restricted_values = None
-
     ERRORS = [IngestTwitterError.TwitterLoginError().get_error_description(),
               IngestTwitterError.TwitterNoScreenNamesError().
               get_error_description()]
@@ -114,7 +112,7 @@ class TwitterFeedingService(FeedingService):
                 headline = "%s: %s" % (status.user.screen_name, status.text)
                 item = {}
                 item['source'] = 'twitter'
-                item['ednote'] = "https://twitter.com/%s/status/%s" % (status.user.screen_name, status.id)
+                item['extra'] = {'tweet_url': "https://twitter.com/%s/status/%s" % (status.user.screen_name, status.id)}
                 item['headline'] = headline
                 item['type'] = 'text'
                 item['guid'] = guid
